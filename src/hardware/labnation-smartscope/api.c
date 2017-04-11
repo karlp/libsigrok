@@ -23,18 +23,38 @@
 #define LNSS_VID 0x4d8
 #define LNSS_PID 0xf4b5
 
+/* TODO - it can be much more, but one step at a time */
+static const uint32_t drvopts[] = {
+	SR_CONF_OSCILLOSCOPE,
+};
+
+/* No scan options, we're lazy */
+static const uint32_t scanopts[] = {
+};
+
+static const uint32_t devopts[] = {
+	SR_CONF_CONTINUOUS,
+};
+
+static const uint32_t devopts_cg[] = {
+};
+
+
 SR_PRIV struct sr_dev_driver labnation_smartscope_driver_info;
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
 	struct drv_context *drvc;
 	struct sr_dev_inst *sdi;
+	struct sr_channel *ch;
+	struct sr_channel_group *cg;
 	GSList *devices;
 	struct libusb_device_descriptor des;
 	libusb_device **devlist;
 	struct libusb_device_handle *hdl;
-	int ret, i;
+	int ret, i, j;
 	char manufacturer[64], product[64], serial_num[64], connection_id[64];
+	char channel_name[16];
 
 	(void)options;
 
@@ -100,6 +120,23 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 		//sdi->version = g_strdup(des.bcdDevice);
 		sdi->serial_num = g_strdup(serial_num);
 		sdi->connection_id = g_strdup(connection_id);
+
+		for (j = 0; j < 2; j++) {
+			snprintf(channel_name, 16, "A%d", j);
+			ch = sr_channel_new(sdi, j, SR_CHANNEL_ANALOG, TRUE, channel_name);
+
+			/* Every analog channel gets its own channel group. */
+			cg = g_malloc0(sizeof(struct sr_channel_group));
+			cg->name = g_strdup(channel_name);
+			cg->channels = g_slist_append(NULL, ch);
+			sdi->channel_groups = g_slist_append(sdi->channel_groups, cg);
+		}
+
+		sr_dbg("Found a " LOG_PREFIX " device.");
+		sdi->status = SR_ST_INACTIVE;
+		sdi->inst_type = SR_INST_USB;
+		sdi->conn = sr_usb_dev_inst_new(libusb_get_bus_number(devlist[i]),
+				libusb_get_device_address(devlist[i]), NULL);
 
 		/* TODO Store anything else in sdi->priv */
 		devices = g_slist_append(devices, sdi);
@@ -187,10 +224,38 @@ static int config_list(uint32_t key, GVariant **data,
 	(void)cg;
 
 	ret = SR_OK;
-	switch (key) {
-	/* TODO */
-	default:
-		return SR_ERR_NA;
+
+	if (key == SR_CONF_SCAN_OPTIONS) {
+		*data = g_variant_new_fixed_array(G_VARIANT_TYPE_UINT32,
+				scanopts, ARRAY_SIZE(scanopts), sizeof(uint32_t));
+		return SR_OK;
+	} else if (key == SR_CONF_DEVICE_OPTIONS && !sdi) {
+		*data = g_variant_new_fixed_array(G_VARIANT_TYPE_UINT32,
+				drvopts, ARRAY_SIZE(drvopts), sizeof(uint32_t));
+		return SR_OK;
+	}
+
+	if (!sdi)
+		return SR_ERR_ARG;
+
+	if (cg) {
+		switch (key) {
+		case SR_CONF_DEVICE_OPTIONS:
+			*data = g_variant_new_fixed_array(G_VARIANT_TYPE_UINT32,
+					devopts_cg, ARRAY_SIZE(devopts_cg), sizeof(uint32_t));
+			break;
+		default:
+			return SR_ERR_NA;
+		}
+	} else {
+		switch (key) {
+		case SR_CONF_DEVICE_OPTIONS:
+			*data = g_variant_new_fixed_array(G_VARIANT_TYPE_UINT32,
+					devopts, ARRAY_SIZE(devopts), sizeof(uint32_t));
+			break;
+		default:
+			return SR_ERR_NA;
+		}
 	}
 
 	return ret;
