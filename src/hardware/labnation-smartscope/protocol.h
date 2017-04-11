@@ -21,6 +21,7 @@
 
 #include <stdint.h>
 #include <glib.h>
+#include <libusb.h>
 #include <libsigrok/libsigrok.h>
 #include "libsigrok-internal.h"
 

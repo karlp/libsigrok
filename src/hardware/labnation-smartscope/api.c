@@ -20,12 +20,21 @@
 #include <config.h>
 #include "protocol.h"
 
+#define LNSS_VID 0x4d8
+#define LNSS_PID 0xf4b5
+
 SR_PRIV struct sr_dev_driver labnation_smartscope_driver_info;
 
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
 	struct drv_context *drvc;
+	struct sr_dev_inst *sdi;
 	GSList *devices;
+	struct libusb_device_descriptor des;
+	libusb_device **devlist;
+	struct libusb_device_handle *hdl;
+	int ret, i;
+	char manufacturer[64], product[64], serial_num[64], connection_id[64];
 
 	(void)options;
 
@@ -33,10 +42,72 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	drvc = di->context;
 	drvc->instances = NULL;
 
-	/* TODO: scan for devices, either based on a SR_CONF_CONN option
-	 * or on a USB scan. */
+	/* TODO: Support SR_CONF_CONN one day */
+	libusb_get_device_list(drvc->sr_ctx->libusb_ctx, &devlist);
+	for (i = 0; devlist[i]; i++) {
+		libusb_get_device_descriptor(devlist[i], &des);
 
-	return devices;
+		if (des.idVendor != LNSS_VID && des.idProduct != LNSS_PID) {
+			continue;
+		}
+
+		if ((ret = libusb_open(devlist[i], &hdl)) < 0) {
+			sr_warn("Failed to open potential device with "
+				"VID:PID %04x:%04x: %s.", des.idVendor,
+				des.idProduct, libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iManufacturer == 0) {
+			manufacturer[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iManufacturer, (unsigned char *) manufacturer,
+				sizeof(manufacturer))) < 0) {
+			sr_warn("Failed to get manufacturer string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iProduct == 0) {
+			product[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iProduct, (unsigned char *) product,
+				sizeof(product))) < 0) {
+			sr_warn("Failed to get product string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		if (des.iSerialNumber == 0) {
+			serial_num[0] = '\0';
+		} else if ((ret = libusb_get_string_descriptor_ascii(hdl,
+				des.iSerialNumber, (unsigned char *) serial_num,
+				sizeof(serial_num))) < 0) {
+			sr_warn("Failed to get serial number string descriptor: %s.",
+				libusb_error_name(ret));
+			continue;
+		}
+
+		usb_get_port_path(devlist[i], connection_id, sizeof(connection_id));
+
+		libusb_close(hdl);
+
+		sdi = g_malloc0(sizeof(struct sr_dev_inst));
+		sdi->status = SR_ST_INITIALIZING;
+		sdi->vendor = g_strdup(manufacturer);
+		sdi->model = g_strdup(product);
+		// TODO - print this to a string? Or query it another way?
+		//sdi->version = g_strdup(des.bcdDevice);
+		sdi->serial_num = g_strdup(serial_num);
+		sdi->connection_id = g_strdup(connection_id);
+
+		/* TODO Store anything else in sdi->priv */
+		devices = g_slist_append(devices, sdi);
+	}
+
+	libusb_free_device_list(devlist, 1);
+
+	return std_scan_complete(di, devices);
 }
 
 static int dev_clear(const struct sr_dev_driver *di)
