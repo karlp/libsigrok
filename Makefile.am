@@ -384,6 +384,12 @@ src_libdrivers_la_SOURCES += \
 	src/hardware/korad-kaxxxxp/protocol.c \
 	src/hardware/korad-kaxxxxp/api.c
 endif
+if HW_LABNATION_SMARTSCOPE
+src_libdrivers_la_SOURCES += \
+	src/hardware/labnation-smartscope/protocol.h \
+	src/hardware/labnation-smartscope/protocol.c \
+	src/hardware/labnation-smartscope/api.c
+endif
 if HW_LASCAR_EL_USB
 src_libdrivers_la_SOURCES += \
 	src/hardware/lascar-el-usb/protocol.h \
