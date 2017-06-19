@@ -154,9 +154,18 @@ static int dev_clear(const struct sr_dev_driver *di)
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
-	(void)sdi;
+	struct sr_usb_dev_inst *usb;
+	int err;
 
-	/* TODO: get handle from sdi->conn and open it. */
+	usb = sdi->conn;
+	sr_warn("Karl - opening dev");
+
+	err = libusb_claim_interface(usb->devhdl, 0);
+	if (err != 0) {
+		sr_err("Unable to claim interface: %s.",
+			libusb_error_name(err));
+		return SR_ERR;
+	}
 
 	sdi->status = SR_ST_ACTIVE;
 
