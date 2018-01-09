@@ -34,9 +34,9 @@ static char get_i2c_reg(const struct sr_dev_inst *sdi, char i2caddr, int idx) {
 	int len, ret;
 	struct sr_usb_dev_inst *usb = sdi->conn;
 
-	unsigned char buf1[] = { HEADER_CMD_BYTE, PICCMD_I2C_WRITE, 2, i2caddr << 1, idx };
-	unsigned char buf2[] = { HEADER_CMD_BYTE, PICCMD_I2C_READ, i2caddr, 1 };
-	unsigned char inp[16];
+	uint8_t buf1[] = { HEADER_CMD_BYTE, PICCMD_I2C_WRITE, 2, i2caddr << 1, idx };
+	uint8_t buf2[] = { HEADER_CMD_BYTE, PICCMD_I2C_READ, i2caddr, 1 };
+	uint8_t inp[16];
 
 	// TODO - len vs expected is probably ideal
 	if ((ret = libusb_bulk_transfer(usb->devhdl, EP_CMD_OUT, buf1, sizeof(buf1), &len, 500))) {
@@ -68,9 +68,11 @@ SR_PRIV bool lnss_version_fpga(const struct sr_dev_inst *sdi, char *dest) {
 		return false;
 	}
 	for (int i = 0; i < 4; i++) {
-		char x = get_i2c_reg(sdi, FPGA_I2C_ADDRESS_ROM, i);
+		// to match vendor sw, it's in reverse order
+		uint8_t x = get_i2c_reg(sdi, FPGA_I2C_ADDRESS_ROM, 3-i);
+		sr_dbg("fpga byte %d = %02x", i, x);
 		/* if the git rev is _plausible_ it's true */
-		if (x != -1) {
+		if (x != 255) {
 			rv = true;
 		}
 		sprintf(dest + i*2, "%02x", x);
