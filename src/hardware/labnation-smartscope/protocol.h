@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <glib.h>
 #include <libusb.h>
@@ -27,9 +28,32 @@
 
 #define LOG_PREFIX "labnation-smartscope"
 
+#define USB_INTERFACE			0
+
+enum PICCMD {
+	PICCMD_PIC_VERSION = 1,
+	PICCMD_PIC_WRITE = 2,
+	PICCMD_PIC_READ = 3,
+	PICCMD_PIC_RESET = 4,
+	PICCMD_PIC_BOOTLOADER = 5,
+	PICCMD_EEPROM_READ = 6,
+	PICCMD_EEPROM_WRITE = 7,
+	PICCMD_FLASH_ROM_READ = 8,
+	PICCMD_FLASH_ROM_WRITE = 9,
+	PICCMD_I2C_WRITE = 10,
+	PICCMD_I2C_READ = 11,
+	PICCMD_PROGRAM_FPGA_START = 12,
+	PICCMD_PROGRAM_FPGA_END = 13,
+	PICCMD_I2C_WRITE_START = 14,
+	PICCMD_I2C_WRITE_BULK = 15,
+	PICCMD_I2C_WRITE_STOP = 16,
+};
+
+
 /** Private, per-device-instance driver context. */
 struct dev_context {
 	/* Model-specific information */
+	char hw_rev[4];
 
 	/* Acquisition settings */
 
@@ -38,6 +62,9 @@ struct dev_context {
 	/* Temporary state across callbacks */
 
 };
+
+SR_PRIV bool lnss_version_fpga(const struct sr_dev_inst *sdi, char *dest);
+SR_PRIV bool lnss_load_fpga(const struct sr_dev_inst *sdi);
 
 SR_PRIV int labnation_smartscope_receive_data(int fd, int revents, void *cb_data);
 

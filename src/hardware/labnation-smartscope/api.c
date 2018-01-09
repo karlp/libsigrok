@@ -17,6 +17,7 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <string.h>
 #include <config.h>
 #include "protocol.h"
 
@@ -45,6 +46,7 @@ SR_PRIV struct sr_dev_driver labnation_smartscope_driver_info;
 static GSList *scan(struct sr_dev_driver *di, GSList *options)
 {
 	struct drv_context *drvc;
+	struct dev_context *devc;
 	struct sr_dev_inst *sdi;
 	struct sr_channel *ch;
 	struct sr_channel_group *cg;
@@ -139,6 +141,11 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 				libusb_get_device_address(devlist[i]), NULL);
 
 		/* TODO Store anything else in sdi->priv */
+		devc = g_malloc0(sizeof(struct dev_context));
+		sdi->priv = devc;
+		memcpy(devc->hw_rev, sdi->serial_num + strlen(sdi->serial_num) - 3, 3);
+		devc->hw_rev[4] = 0;
+
 		devices = g_slist_append(devices, sdi);
 	}
 
@@ -154,18 +161,36 @@ static int dev_clear(const struct sr_dev_driver *di)
 
 static int dev_open(struct sr_dev_inst *sdi)
 {
+	struct sr_dev_driver *di = sdi->driver;
+	struct drv_context *drvc = di->context;
+	struct dev_context *devc;
 	struct sr_usb_dev_inst *usb;
-	int err;
+	int err, ret;
 
+	devc = sdi->priv;
 	usb = sdi->conn;
-	sr_warn("Karl - opening dev");
+	sr_warn("Karl - opening dev: hwrev: %s", devc->hw_rev);
 
-	err = libusb_claim_interface(usb->devhdl, 0);
-	if (err != 0) {
-		sr_err("Unable to claim interface: %s.",
-			libusb_error_name(err));
+	if (sr_usb_open(drvc->sr_ctx->libusb_ctx, usb) != SR_OK)
+		return SR_ERR;
+
+	if ((ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE)) < 0) {
+		sr_err("Failed to claim interface: %s.",
+			libusb_error_name(ret));
 		return SR_ERR;
 	}
+
+	// check current fpga version, and potentially upload
+	char fpga_version[9];
+	bool ok = lnss_version_fpga(sdi, fpga_version);
+	if (!ok) {
+		sr_dbg("fpga version was garbage, uploading based on hwrev");
+		lnss_load_fpga(sdi);
+	} else {
+		sr_dbg("fpga version sane: %s, no reason to upload", fpga_version);
+	}
+
+
 
 	sdi->status = SR_ST_ACTIVE;
 
