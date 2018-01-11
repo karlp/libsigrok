@@ -271,6 +271,11 @@ SR_PRIV int sr_resource_open(struct sr_context *ctx,
 	res->handle = NULL;
 	res->type = type;
 
+	if (!ctx->resource_open_cb) {
+		sr_err("No resource open callback in context!");
+		return SR_ERR_ARG;
+	}
+
 	ret = (*ctx->resource_open_cb)(res, name, ctx->resource_cb_data);
 
 	if (ret != SR_OK)
