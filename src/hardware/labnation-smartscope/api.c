@@ -165,7 +165,7 @@ static int dev_open(struct sr_dev_inst *sdi)
 	struct drv_context *drvc = di->context;
 	struct dev_context *devc;
 	struct sr_usb_dev_inst *usb;
-	int err, ret;
+	int ret;
 
 	devc = sdi->priv;
 	usb = sdi->conn;
@@ -185,7 +185,17 @@ static int dev_open(struct sr_dev_inst *sdi)
 	bool ok = lnss_version_fpga(sdi, fpga_version);
 	if (!ok) {
 		sr_dbg("fpga version was garbage, uploading based on hwrev");
-		lnss_load_fpga(sdi);
+		ok = lnss_load_fpga(sdi);
+		if (!ok) {
+			sr_err("Failed to load fpga on device!");
+			return SR_ERR;
+		}
+		ok = lnss_version_fpga(sdi, fpga_version);
+		if (!ok) {
+			sr_err("Failed to read back fpga version after load!");
+			return SR_ERR;
+		}
+		sr_dbg("fpga version after load was: %s", fpga_version);
 	} else {
 		sr_dbg("fpga version sane: %s, no reason to upload", fpga_version);
 	}

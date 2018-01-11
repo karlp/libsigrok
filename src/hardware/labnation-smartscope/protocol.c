@@ -18,6 +18,8 @@
  */
 
 #include <config.h>
+#include <string.h>
+#include <unistd.h>
 #include "protocol.h"
 
 #define FPGA_I2C_ADDRESS_ROM  0x0D
@@ -82,15 +84,84 @@ SR_PRIV bool lnss_version_fpga(const struct sr_dev_inst *sdi, char *dest) {
 }
 
 SR_PRIV bool lnss_load_fpga(const struct sr_dev_inst *sdi) {
-	struct dev_context *devc;
-	struct sr_usb_dev_inst *usb;
-	int err;
+	struct sr_usb_dev_inst *usb = sdi->conn;
+	struct drv_context *drvc = sdi->driver->context;
+	struct dev_context *devc = sdi->priv;
+	unsigned i, err;
+	char name[200];
+	uint8_t *firmware;
+	size_t length;
 
-	devc = sdi->priv;
-	usb = sdi->conn;
+	/* Straight from labnation code. don't ask me what the real plan is */
+	int PACKSIZE = 32;
+	unsigned PADDING = 2048/8;
 
-	sr_dbg("attempting to load fpga");
+	snprintf(name, sizeof(name) - 1, "SmartScope_%s.bin", devc->hw_rev);
 
+	/* All existing blogs are < 300k, don't really expect much change */
+	firmware = sr_resource_load(drvc->sr_ctx, SR_RESOURCE_FIRMWARE,
+		name, &length, 400 * 1024);
+	if (!firmware) {
+		sr_err("Failed to load firmware :(");
+		return false;
+	}
+
+	int cmd = length / PACKSIZE + PADDING;
+	uint8_t cmd_start[] = {HEADER_CMD_BYTE, PICCMD_PROGRAM_FPGA_START, cmd >> 8, cmd & 0xff};
+	uint8_t cmd_end[] = {HEADER_CMD_BYTE, PICCMD_PROGRAM_FPGA_END};
+
+	sr_info("Uploading firmware '%s'.", name);
+	err = libusb_bulk_transfer(usb->devhdl, EP_CMD_OUT, cmd_start, sizeof(cmd_start), NULL, 200);
+	if (err != 0) {
+		sr_err("Failed to start fpga programming: %s", libusb_error_name(err));
+		return false;
+	}
+	err = libusb_clear_halt(usb->devhdl, EP_DATA);
+	if (err != 0) {
+		sr_err("Failed to clear halt stage 1: %s", libusb_error_name(err));
+		return false;
+	}
+	sleep(1); // workaround from labnation, not _entirely_ sure it's necessary
+
+	int chunkcnt = 0;
+	int actual;
+	int actual_sum = 0;
+	for (i = 0; i < length; i += 2048) {
+		int desired = MIN(2048, length - i);
+		err = libusb_bulk_transfer(usb->devhdl, EP_CMD_OUT, firmware+i, desired, &actual, 200);
+		if (err != 0) {
+			sr_err("Failed to write chunk %d (%d bytes): %s", chunkcnt, desired, libusb_error_name(err));
+			return false;
+		}
+		chunkcnt++;
+		sr_dbg("wrote chunk %d for %d bytes, libusb: %d", chunkcnt, actual, err);
+		if (actual != desired) {
+			sr_warn("Failed to write a chunk %d : %d < 2048", chunkcnt, actual);
+		}
+		actual_sum += actual;
+	}
+	sr_dbg("After %d chunks, have written %u, length=%lu", chunkcnt, actual_sum, length);
+
+	/* this seems rather insane, but, hey, it's what the vendor code does... */
+	uint8_t data[32];
+	memset(data, 0xff, sizeof(data));
+	for (i = 0; i < PADDING; i++) {
+		err = libusb_bulk_transfer(usb->devhdl, EP_CMD_OUT, data, 32, NULL, 200);
+		if (err != 0) {
+			sr_err("Failed to write 0xff trailer iteration: %d : %s", i, libusb_error_name(err));
+			return false;
+		}
+	}
+	err = libusb_bulk_transfer(usb->devhdl, EP_CMD_OUT, cmd_end, sizeof(cmd_end), NULL, 200);
+	if (err != 0) {
+		sr_err("Failed to exit fpga programming : %s", libusb_error_name(err));
+		return false;
+	}
+	err = libusb_clear_halt(usb->devhdl, EP_DATA);
+	if (err != 0) {
+		sr_err("Failed to clear halt stage 2: %s", libusb_error_name(err));
+		return false;
+	}
 	return true;
 }
 
