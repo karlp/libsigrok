@@ -1,0 +1,103 @@
+
+
+from boot venndor software does
+
+get pic version
+flash rom read from 0 in 0xb chunks for a little while?
+(long while! up to fraame ~479
+
+then the fpga flashing...
+all the way to frame 1251 (clear feature at end)
+
+
+c0 0a 02 1a 00  >> i2c write preparing an i2c read of FPGA_I2C_ADDRESS_ROM, address 0
+c0 0b 0d 01 >> finishing i2c read of 1 byte., 0xd == 0x1a >> 1
+for all four bytes
+then does it again
+now fram 1301
+
+c0 0a 03 18 21 00 >> i2c write, 0x18>>1 == 0xc FPGA_I2C_ADDRESS_SETTINGS = 0x0c, (3==len) x21 = 0?
+		(digital out  = 0?
+c0 0a 03 18 25 ff >> i2c write, 3 bytes, 0x18 = settings, 0x25 == 0xff? GENERATOR_SAMPLES_B0 = 0xfF?
+c0 0a 03 18 26 07 >> i2c write, 0x26 = 7, GENERATOR_SAMPLES_B1 = 7?
+c0 0a 03 18 00 01 >> strobe update = 1.  strobe 0 = 1? global_reset=1!
+
+***** nxt, unknown! frame 1309
+c0 02 00 01 00 >> pic write!  1 byte addr 0 = 0?
+	>> pic  memory.commit()?  or "force streaming = 0?" FORCE_STREAMING
+
+c0 0a 03 18 01 00 >> i2c write settings, addr 1 =0?  SPI_ADDRESS = 0. (talking to the adc!)
+c0 0a 03 18 02 00 >> i2c write spi value = 0
+   >> writing 0 to the power enabel regs of the adc chip (powers _off_ a+b)
+
+c0 0a 03 18 00 02 >> strobe update, 2.  so 1 = 0? INIT_SPI_TRANSFER = 0?
+c0 0a 03 18 00 03 >> strobe update, INIT_SPI_TRANSFER = 1?
+
+c0 0a 03 18 01 01 >> spi addr = 1
+c0 0a 03 18 02 00 >> write 0 to spi reg 1
+(followed by 00 02 and 0003 to trigger spi transfer) sets output format of adc
+
+c0 0a 03 18 01 02 >> spi addr = 2
+  >> value = 0
+
+spi addr 3,4,5,6,8 all 0 (7 is reserved)
+
+fram 1375
+c0 0a 03 18 01 0a >> spi addr = 0xa
+c0 0a 03 18 02 00 >> write 0 to spi reg? (datasheet says 0x5a to sw reset)
+	>> error in labnation code?
+
+frame 1383! new code
+c0 0a 1d 18 03 99 70 70 00 7e 00 00 00 00 ff ff
+ff 00 00 00 00 00 00 00 00 00 00 00 06 00 00 00
+	>> write 26? bytes to i2c reg 3? DIVIDER_MULTIPLIER = blah...
+
+c0 0a 05 18 1e 00 00 00 >> write 3(5-2) bytes to ... reg 30 DIGITAL_TRIGGER_FALLING = 0?
+c0 0a 05 18 22 00 00 00 >> write 0 to GENERATOR_DECIMATION_B0?
+c0 0a 03 18 00 04 >> update strobe 4 = 0? LA_ENABLE == 0? or 4>>1? GENERATOR_TO_AWG = 0
+c0 0a 03 18 00 06 >> update strobe 6 = 0? 6>>1 = LA_ENABLE=0
+c0 0a 03 18 00 09 >> update strobe 4=1 9>>1=4= SCOPE_ENABLE = 1
+c0 0a 03 18 00 0a >> update strobe 5=1? == SCOPE_UPDATE = 1?
+c0 0a 03 18 00 0c >> update strobe 6=1 FORCE_TRIGGER = 1?
+ then 0xe, => 7 = 1 = VIEW_UPDATE = 1?
+then 0x10 => 8 = 0 = VIEW_SEND_OVERVIEW = 0
+then 0x12 => 9 = 0 = VIEW_SEND_PARTIAL = 0
+then 0x14 => 10 = 0 = ACQ_START = 0
+then 0x16 => 11 = 0 = ACQ_STOP = 0
+then 0x19 => 12 = 1 = CHA_DCCOUPLING = 1
+then 0x1b => 13 = 1 = CHB_DCCOUPLING = 1
+then 0x1d => 14 = 1 = ENABLE_ADC = 1
+then 0x1f => 15 = 1 = ENABLE_NEG = 1
+then 0x21 => 16 = 1 = ENABLE_RAM = 1
+then 0x22 => 17 = 0 = DOUT_3V_5V = 0
+then 0x24 => 18 = 0 = EN_OPAMP_B = 0 >> frame 1421
+then 0x26 => 19 = 0 = GENERATOR_TO_DIGITAL = 0
+then 0x28 => 20 = 0 = ROLL = 0
+then 0x2a => 21 = 0 = LA_CHANNEL = 0 fr1427
+back to 0xb =>  5 = 1  SCOPE_UPDATE = 1 again
+and 0xf => 7 = 1 VIEW_UPDATE = 1 again
+clear endpoitn halt again on 0x81  fr1433
+
+then "configure_adc"() takes you to frame 1489
+
+c0 0a 04 18 07 7f 80 >> i2c(settings) write 7 = 0x7f 80 ==> set trigger byte = 127
+c0 0a 03 18 10 01 >> i2c(settings) write 0x10 = 1 => 
+c0 0a 06 18 15 01 00 00 00 >> i2c(settings) write 0x15 = 01 00 00 00
+c0 0a 05 18 1a 06 00 00 >> i2c(settings) write 0x1a = 06 00 00
+c0 0a 03 18 00 06 >> strobe 3 clear.
+c0 0a 03 18 00 10 >> strobe 8 clear
+then 0x12, >> strobe 9 clear 
+then 0x15 >> strobe 10 set  >> ACQ_START!  fr1505
+then 0x2a >> strobe 21 clear
+then 0xb >> strobe 5 set >> SCOPE_UPDATE  = 1
+thenn 0xf >> strobe 7 set >> view update = 1
+
+now we get data back!
+read 64, get teh LN header
+then read 4096  (fr1516)
+
+
+
+
+
+
