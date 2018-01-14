@@ -191,7 +191,7 @@ def get_acquisition():
         hdr = dev.read(EP_DATA, SZ_HDR, 1000) # smartscope uses 3000, but what....
         print("tries = ", tries, "reply was", hdr)
         # silly unpacking bytearray
-        if [z for z in hdr[:2]] == [ord(q) for q in "LN"]:
+        if hdr[:2].tolist() == [ord(q) for q in "LN"]:
             break
         tries += 1
         if tries > PACKAGE_MAX:
@@ -434,6 +434,9 @@ def tryread():
     hdr = get_acquisition()
     data = dev.read(EP_DATA, FETCH_SIZE_MAX, 1000)
     print("Whee, matchhingn header =", hdr)
+    # unsafe public struct SmartScopeHeader is the format of hdr.
+    # look at struct.unpack maybe?
+    # contains some flags, "HDR_REGS" and then HDR_STROBES
     print("got data of len", len(data))
 
 
