@@ -4,7 +4,12 @@ from boot venndor software does
 
 get pic version
 flash rom read from 0 in 0xb chunks for a little while?
-(long while! up to fraame ~479
+(long while! up to fraame 450 for last reply)
+! ok, this is important! this is reading all the calibration!
+! src/Devices/SmartScopeRom.cs
+!        [StructLayout(LayoutKind.Sequential)]
+!        unsafe struct Map
+
 
 then the fpga flashing...
 all the way to frame 1251 (clear feature at end)

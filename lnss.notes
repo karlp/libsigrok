@@ -62,3 +62,16 @@ headerr = ctrl, write, address, length
      => HDR_CMD, I2C_READ, address>>8 (i2caddress => 0xd), len=1
  => write header from above to cmd_out
  => read 16 from cmd_in
+
+
+
+
+
+in CXX, all they expose is
+and that's enough to do the rest! (app is clever enough to know address aand len and data.
+SET:
+            _scope->SetControllerRegister(ctrl_msg->ctrl, ctrl_msg->addr, ctrl_msg->len, ctrl_msg->data);
+
+and GET:
+            _scope->GetControllerRegister(ctrl_msg->ctrl, ctrl_msg->addr, ctrl_msg->len, ((ControllerMessage*)response->data)->data);
+

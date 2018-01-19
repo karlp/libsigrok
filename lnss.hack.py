@@ -1,7 +1,11 @@
 import enum
 import time
+import math
+import struct
 import usb.core
 import usb.util as uu
+import matplotlib.pyplot as plt
+
 VENDOR_ID=0x04d8
 PRODUCT_ID=0xf4b5
 
@@ -16,6 +20,12 @@ print("device iSerial == ", dev.serial_number) # good, this works
 # get pic version..
 HEADER_CMD_BYTE = 0xC0 #C0 as in Command
 HEADER_RESPONSE_BYTE = 0xAD #AD as in Answer Dude
+FLASH_USER_ADDRESS_MASK = 0x0FFF
+
+class CONSTANTS():
+        validDividers = [ 1, 6, 36 ];
+        validMultipliers = [ 1.1, 2, 3 ];
+        BASE_SAMPLE_PERIOD = 10e-9 # 10MHz sample rate
 
 
 class PIC_CMDS(enum.IntEnum):
@@ -77,6 +87,48 @@ class REG(enum.IntEnum):
 		GENERATOR_SAMPLES_B0 = 37, #0x25
 		GENERATOR_SAMPLES_B1 = 38, #0x26
 
+def REG2HREG(reg):
+    """
+    Convert a class REG(enum.IntEnum) into the offset needed for the header regs
+    will raise if you try to get theh index of a register not available in teh headers
+    """
+    # straight from Scope_Constants_GEN.cs
+    rmap = [
+		[ REG.TRIGGER_LEVEL, 0 ],
+		[ REG.TRIGGER_MODE, 1 ],
+		[ REG.TRIGGERHOLDOFF_B0, 2 ],
+		[ REG.TRIGGERHOLDOFF_B1, 3 ],
+		[ REG.TRIGGERHOLDOFF_B2, 4 ],
+		[ REG.TRIGGERHOLDOFF_B3, 5 ],
+		[ REG.CHA_YOFFSET_VOLTAGE, 6 ],
+		[ REG.CHB_YOFFSET_VOLTAGE, 7 ],
+		[ REG.DIVIDER_MULTIPLIER, 8 ],
+		[ REG.INPUT_DECIMATION, 9 ],
+		[ REG.TRIGGER_PW_MIN_B0, 10 ],
+		[ REG.TRIGGER_PW_MIN_B1, 11 ],
+		[ REG.TRIGGER_PW_MIN_B2, 12 ],
+		[ REG.TRIGGER_PW_MAX_B0, 13 ],
+		[ REG.TRIGGER_PW_MAX_B1, 14 ],
+		[ REG.TRIGGER_PW_MAX_B2, 15 ],
+		[ REG.TRIGGER_PWM, 16 ],
+		[ REG.DIGITAL_TRIGGER_RISING, 17 ],
+		[ REG.DIGITAL_TRIGGER_FALLING, 18 ],
+		[ REG.DIGITAL_TRIGGER_HIGH, 19 ],
+		[ REG.DIGITAL_TRIGGER_LOW, 20 ],
+		[ REG.ACQUISITION_DEPTH, 21 ],
+		[ REG.VIEW_DECIMATION, 22 ],
+		[ REG.VIEW_OFFSET_B0, 23 ],
+		[ REG.VIEW_OFFSET_B1, 24 ],
+		[ REG.VIEW_OFFSET_B2, 25 ],
+		[ REG.VIEW_ACQUISITIONS, 26 ],
+		[ REG.VIEW_BURSTS, 27 ],
+		[ REG.VIEW_EXCESS_B0, 28 ],
+		[ REG.VIEW_EXCESS_B1, 29 ],
+    ]
+    matches = [x for x in rmap if x[0] == reg]
+    if len(matches) != 1:
+        raise Exception("register requested not a header register" + reg.name)
+    return matches[0][1]
 
 class STR(enum.IntEnum):
 		GLOBAL_RESET = 0,
@@ -102,6 +154,17 @@ class STR(enum.IntEnum):
 		ROLL = 20,
 		LA_CHANNEL = 21,
 
+# HeaderFlags
+class HDRF(enum.IntEnum):
+        Acquiring = 1,
+        IsOverview = 2,
+        IsLastAcquisition = 4,
+        Rolling = 8,
+        TimedOut = 16,
+        AwaitingTrigger = 32,
+        Armded = 64,
+        IsFullAcqusition = 128,
+
 
 # send command = header_cmd, pic_version, and then read 16
 
@@ -121,7 +184,62 @@ def get_pic_ver():
     print("as per labnation: %x%x%x or bytes 6,5,4" % (y[6],y[5],y[4]))
     print([hex(q) for q in y])
 
+def get_eeprom(i, n=1):
+    """Reads the internal pic eeprom presumably.  Mine's all 0xff, so... never used as far as I can tell"""
+    x = dev.write(EP_CMD_OUT, [HEADER_CMD_BYTE, PIC_CMDS.EEPROM_READ.value, i, n])
+    y = dev.read(EP_CMD_IN, 16)
+    assert(len(y) == 16)
+    # All we know unfortunately is taht the first 4 bytes are "garbage"
+    # We'll try a few reads of different sizes, see what we can work out ;)
+    print("For geteeprom ", i, n, [hex(q) for q in y[4:]])
+
+def get_rom(i, n=1):
+    """
+    Reads the scope "ROM".  not the fpga "ROM", this appears to be a flash page in the PIC maybe?
+    see the "unsafe struct Map" in src/Devices/SmartScopeRom.cs
+    It contains all the calibration data that we need later.
+    """
+    if (i + n > FLASH_USER_ADDRESS_MASK):
+        print("Not allowed to try accessing flash (""rom"") beyond: ", FLASH_USER_ADDRESS_MASK)
+        return
+    dev.write(EP_CMD_OUT, [HEADER_CMD_BYTE, PIC_CMDS.FLASH_ROM_READ.value, i & 0xff, n, (i>>8) & 0xff])
+    y = dev.read(EP_CMD_IN, 16)
+    assert(len(y) == 16)
+    data = y[5:5+n]
+    #print("Get rom ", i, n, [hex(q) for q in data])
+    return data
+
+
 get_pic_ver()
+
+
+def dump_calibration_raw():
+    # Not clear yet which of them are actually used!
+    OFF_PLUGCNT=0
+    OFF_GAINCAL = 4
+    OFF_MAG = 220
+    OFF_MAGIDX = 604
+    OFF_PHASE = 796
+    OFF_PHASEIDX = 1036
+    OFF_ADCTV = 1156  # UNUSED!
+
+    plugcount = get_rom(0, 4)
+    plugcnt = struct.unpack("<L", plugcount)[0]
+    print("plug count is ", plugcnt, hex(plugcnt))
+    adctimingvalue = get_rom(OFF_ADCTV, 1)[0]
+    print("ADC timing value is ", adctimingvalue, hex(adctimingvalue))
+    # ohh yeah, fuck you. We have space in rom for calibratint this, but
+    # we're acttually just going to hardcode it anyway later regardless.
+    
+    # gaincalibration is 54 floats, 3 coeffs * nDivider(3) * nMultiplier(3) * nChannel(2)
+    gaincalibration = []
+    for n in range(OFF_GAINCAL, OFF_MAG, 4):
+        d = get_rom(OFF_GAINCAL + n, 4)
+        gaincalibration.append(struct.unpack("<f", d))
+    print("got gain calibration values, len", len(gaincalibration))
+
+#dump_calibration_raw()
+    
 
 # src/Hardware/SmartScopeInterfaceUsb.cs is key
 # Now, do an fpga i2c read of the fpga rom, to get the git version!
@@ -187,6 +305,8 @@ def get_acquisition():
     tries = 0
     hdr = None
     # seriously, trying 64 times sounds completely broken, but it's what the venndor code does...
+    # ok, later thought, 64*64 is 4096, it's trying to make sure that it finishes reading a data
+    # packet if one wsa in progress. (Still sounds buggy honestly, butt ok...)
     while True:
         hdr = dev.read(EP_DATA, SZ_HDR, 1000) # smartscope uses 3000, but what....
         print("tries = ", tries, "reply was", hdr)
@@ -250,12 +370,6 @@ def pic_reset():
     assert(x == 2)
 
     
-load_blob(BLOBPATH, get_hw_rev())
-print("after loading, can still get pic rev: ", get_pic_ver())
-#pic_reset()
-
-print("after loading fw, fw rev is", get_fpga_ver())
-#print("after loading", get_acquisition_mode())
 
 def get_acquisition_depth():
     reggs = [
@@ -356,9 +470,11 @@ def configure_adc():
     spi_write(0, 3) # AdcMemory[MAX19506.POWER_MANAGEMENT].Set(3);
     spi_write(1, 2) #AdcMemory[MAX19506.OUTPUT_FORMAT].Set(0x02); //DDR on chA
     spi_write(2, 0) #AdcMemory[MAX19506.OUTPUT_PWR_MNGMNT].Set(0);
+    # XXX This is hard coded, despite in theory being a "calibration" value from ROM :(
     spi_write(3, 0x18) # AdcMemory[MAX19506.DATA_CLK_TIMING].Set(24);
     spi_write(4, 0) # AdcMemory[MAX19506.CHA_TERMINATION].Set(0);
-    spi_write(6, 0x50)# AdcMemory[MAX19506.FORMAT_PATTERN].Set(80);
+    # no, don't do that, that just turns it to test patterns, screw that
+    #spi_write(6, 0x50)# AdcMemory[MAX19506.FORMAT_PATTERN].Set(80);
 
 def post_blob_load():
     """From usb trace"""
@@ -374,6 +490,7 @@ def post_blob_load():
     #print("reading spi 0 at defualt", spi_read(0))
 
     # reset's all spi registers to 0 on max19506
+    # TODO - seems _completely_ unnnecessary when the next step is to reset the chip!
     for spireg in [0,1,2,3,4,5,6,8]:
         spi_write(spireg, 0)
     spi_write(0xa, 0) # appears to be a bug in labnation?
@@ -382,6 +499,7 @@ def post_blob_load():
         #static readonly double[] validDividers = { 1, 6, 36 };
         #static readonly double[] validMultipliers = { 1.1, 2, 3 };
     # definitely eeds to cover both channels here?
+    # XXX this almost definitely comes from the rom calibraton!
     x = "99 70 70 00 7e 00 00 00 00 ff ff ff 00 00 00 00 00 00 00 00 00 00 00 06 00 00 00"
     i2c_writen(REG.DIVIDER_MULTIPLIER, [int(q,16) for q in x.split()])
 
@@ -416,6 +534,7 @@ def post_blob_load():
     configure_adc()
 
     # There might be a big missing chunk here of adc calibration!
+    #TestAdcRamp() !!!
 
     i2c_writen(REG.TRIGGER_LEVEL, [0x7f,80]) # 0x7f is 127, and code is SetTriggerByte(127);
     i2c_write1(REG.ACQUISITION_DEPTH, 1)
@@ -430,17 +549,110 @@ def post_blob_load():
     strobe_set(STR.VIEW_UPDATE, 1)
     
 
-def tryread():
+def tryread(plot=False):
     hdr = get_acquisition()
     data = dev.read(EP_DATA, FETCH_SIZE_MAX, 1000)
-    print("Whee, matchhingn header =", hdr)
     # unsafe public struct SmartScopeHeader is the format of hdr.
-    # look at struct.unpack maybe?
-    # contains some flags, "HDR_REGS" and then HDR_STROBES
     print("got data of len", len(data))
+    structs = "2sbbHH2xBB3x30s2s17x"
+    magic, hoff, bpb, nburst, off, flags, aid, hregs, hstrobes = struct.unpack(structs, hdr)
+    #print("stuff", magic, hoff, bpb, nburst, off, flags, aid, hregs, hstrobes)
+    print("Header flags = %#x" % flags)
+    for hf in HDRF:
+        if flags & hf.value:
+            print("header flag had", hf.name)
+    print("burst size = ", nburst)
+    print("bytes per burst ", bpb)
+    print("acq id ", aid)
 
+    # Dictionary<AnalogChannel, GainCalibration> channelConfig = hdr.ChannelSettings(this.rom);
+    # TODO we don't actually use thihs, but we should at some point...
+    for ch in [("CHA",0), ("CHB",1)]:
+        # hregs is a subset of all the regs, presented everytime in the header.
+        divmul = hregs[REG2HREG(REG.DIVIDER_MULTIPLIER)]
+        div = CONSTANTS.validDividers[divmul >> (0 + ch[1]*4) & 0x3]
+        mul = CONSTANTS.validMultipliers[divmul >> (2 + ch[1]*4) & 0x3]
+        print("chanel: %s div: %f, mul=%f" % (ch[0], div, mul))
+        # TODO - we should correlate this with calibration at some point.
+        # We need to look up ... somewhere, some calibrationnn coeffs thata are
+        # per channnel/div/mul set.
+
+    
+    #, so, the FUN! SplitAndConvert() the 4k data into channel/data pair
+    # aiui, it's 2 channels, no matter whether you have one or both enabled?
+    # I presume LA just replaces one channel?
+    # yes, always two channnels, 
+    # if (header.GetStrobe(STR.LA_ENABLE) && header.GetStrobe(STR.LA_CHANNEL) == ch.Value > 0)
+    # is hhow you know whether a channel is logic or analog, and which is which.
+    # TODO - eed a STR2HSTR() function too for the header strobes
+    
+
+    # Not sure I even care about shorter reads... so.
+    dlen = FETCH_SIZE_MAX / 2
+    for ch in [("CHA",0), ("CHB",1)]:
+#       will eventually need to handle things like these...
+#       # TODO I don't really understannd where they're kept yet, but I'm betting it's
+#       # the big traansfer of 27 bytes to REG.DIVIDER_MULTIPLIER above
+#       coeff is from the calibration stuff above
+#                byte yOffset = header.GetRegister(ch.YOffsetRegister());
+#                float probeGain = probeSettings[ch].Gain;
+#                float probeOffset = probeSettings[ch].Offset;
+#                float totalOffset = (float)(yOffset * coeff[1] + coeff[2]);
+        pass
+    # Data is just A,B,A,B,A,B to thhe ennd...
+    #channeldata = zip(*[data[idx:idx + 2] for idx in range(0, len(data), 2)])
+    #chad = channeldata[0]
+    #chbd = channeldata[1]
+    # or just, if itt works on the pyusb data
+    chad = data[0::2]
+    chbd = data[1::2]
+    print("have %d chA and %d chB" % (len(chad), len(chbd)))
+    # FIXME here's where you could scale/multiply the cal stuff
+
+    if flags & HDRF.IsOverview.value:
+        print("Acquisitionn is of type OVERVIEW")
+    else:
+        if flags & HDRF.IsFullAcqusition:
+            print("Acquisition is of type ACQUISITION")
+        else:
+            print("acquisition is of type VIEWPORT")
+
+    print("innputdeci is ", REG2HREG(REG.INPUT_DECIMATION), hregs[REG2HREG(REG.INPUT_DECIMATION)])
+    sample_period = CONSTANTS.BASE_SAMPLE_PERIOD * math.pow(2, hregs[REG2HREG(REG.INPUT_DECIMATION)])
+    print("Sample period is ", sample_period)
+    # default acquisitionn is 512k, so will take, at 2k/transfer,
+    # 256 transfers? shouldn't it keep acqid thhen?
+    
+    acq_depth = 2048 << hregs[REG2HREG(REG.ACQUISITION_DEPTH)]
+    print("acq depth = ", acq_depth)
+    vp_excess_samps = hregs[REG2HREG(REG.VIEW_EXCESS_B0)] + hregs[REG2HREG(REG.VIEW_EXCESS_B1)] << 8
+    print("vp excess = ", vp_excess_samps)
+
+    # I think that's it, now need to write stobes to switch to the other modes?
+    # try plotting the data!
+    #print(chad)
+    # heh, it's a ramp.  guess those settings above set up thhe calibrationn ramp
+    if plot:
+        plt.plot(chad)
+        plt.ylabel('rawbitval')
+        plt.show()
+
+
+def read_forever():
+    # This works, I get a 64byte header, annd then 4k blocks continuously, at least with my
+    # test setup.
+    while True:
+        tryread()
+
+
+#load_blob(BLOBPATH, get_hw_rev())
+print("after loading, can still get pic rev: ", get_pic_ver())
+#pic_reset()
+print("after loading fw, fw rev is", get_fpga_ver())
+#print("after loading", get_acquisition_mode())
 
 post_blob_load()
 #read_strobes()
-tryread()
+tryread(True)
+#read_forever()
 
