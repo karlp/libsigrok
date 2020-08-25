@@ -33,7 +33,7 @@ static void handle_packet(const uint8_t *buf, struct sr_dev_inst *sdi)
 	devc = sdi->priv;
 
 	/* TODO: Use proper 'digits' value for this device (and its modes). */
-	sr_analog_init(&analog, &encoding, &meaning, &spec, 2);
+	sr_analog_init(&analog, &encoding, &meaning, &spec, 4);
 
 	analog.num_samples = 1;
 	analog.meaning->mq = 0;
