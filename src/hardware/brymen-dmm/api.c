@@ -35,6 +35,8 @@ static const uint32_t devopts[] = {
 	SR_CONF_LIMIT_MSEC | SR_CONF_SET,
 };
 
+static const int rts_toggle_delay_us = 100000;
+
 static GSList *brymen_scan(struct sr_dev_driver *di, const char *conn,
 	const char *serialcomm)
 {
@@ -52,6 +54,22 @@ static GSList *brymen_scan(struct sr_dev_driver *di, const char *conn,
 		return NULL;
 
 	sr_info("Probing port %s.", conn);
+
+	/**
+	 * per "Protocol for 500000-count multimeter series" document from wiki
+	 * we must toggle RTS on port open to wakeup the meter.
+	 * As this was not in the original code, it is presumably only needed
+	 * for the newer meters supported by the BC-85Xa interface cable
+	 * not the original BC-85X cable used traditionally.
+	 */
+	/* FIXME - we're not meant to reach directly into libserialport :( */
+	g_usleep(rts_toggle_delay_us);
+	sp_set_rts(serial->sp_data, SP_RTS_ON);
+	g_usleep(rts_toggle_delay_us);
+	sp_set_rts(serial->sp_data, SP_RTS_OFF);
+	g_usleep(rts_toggle_delay_us);
+	sp_set_rts(serial->sp_data, SP_RTS_ON);
+	g_usleep(rts_toggle_delay_us);
 
 	devices = NULL;
 
