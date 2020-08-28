@@ -161,7 +161,7 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	sr_dbg("Received: %d, %s", i, reply);
 	model_id = -1;
 
-	/* Truncate before serial number. */
+	/* Separate the serial number if found. */
 	char *sn = g_strrstr(reply, " SN:");
 	if (sn)
 		*sn = '\0';
@@ -192,6 +192,10 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	sdi->status = SR_ST_INACTIVE;
 	sdi->vendor = g_strdup(models[model_id].vendor);
 	sdi->model = g_strdup(models[model_id].name);
+	/* use the serial number if one was found */
+	if (sn) {
+		sdi->serial_num = g_strdup(sn+4);
+	}
 	sdi->inst_type = SR_INST_SERIAL;
 	sdi->conn = serial;
 	sdi->connection_id = g_strdup(conn);
