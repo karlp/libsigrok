@@ -38,27 +38,43 @@ SR_PRIV int korad_kaxxxxp_send_cmd(struct sr_serial_dev_inst *serial,
 	return ret;
 }
 
+/**
+ * Look for a non-terminated variable length string.
+ * The only termination is timeout or the expected max length reply.
+ * While normal commands are fixed length, and we could simply retry a full
+ * read, scan is variable length.  We know that devices can be very slow to
+ * respond, so allow plenty of time for first data, but once they start to
+ * reply, we don't expect any meaningful delays beyond baudrate expectations.
+ */
 SR_PRIV int korad_kaxxxxp_read_chars(struct sr_serial_dev_inst *serial,
 				int count, char *buf)
 {
-	int ret, received, turns;
+	int limit, ret, received, turns;
 
 	received = 0;
 	turns = 0;
+	const int limit_first = 100;
+	const int limit_later = 3;
+
+	limit = limit_first;
 
 	do {
 		if ((ret = serial_read_blocking(serial, buf + received,
-				count - received,
-				serial_timeout(serial, count))) < 0) {
+				1, serial_timeout(serial, 1))) < 0) {
 			sr_err("Error %d reading %d bytes from device.",
 			       ret, count);
 			return ret;
 		}
 		received += ret;
+		limit = received ? limit_later : limit_first;
+		if (ret == 1) {
+			turns = 0;
+		}
 		turns++;
-	} while ((received < count) && (turns < 100));
+	} while ((received < count) && (turns < limit));
 
-	buf[count] = 0;
+	/* will at most be == count */
+	buf[received+1] = 0;
 
 	sr_spew("Received: '%s'.", buf);
 
